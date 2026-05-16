@@ -140,21 +140,21 @@ The core insight: Google ratings are tourist-inclusive, XHS ratings reflect the 
 
 ```mermaid
 quadrantChart
-    title Restaurant Authenticity Quadrants
+    title Restaurant Authenticity Quadrants (threshold = 75pts)
     x-axis Low Google Score --> High Google Score
     y-axis Low XHS Score --> High XHS Score
     quadrant-1 Must Visit
     quadrant-2 Hidden Gem
     quadrant-3 General Rec
     quadrant-4 Overhyped
-    Sea Harbour Seafood: [0.92, 0.90]
-    101 Noodle Express: [0.88, 0.88]
-    Chengdu Taste: [0.72, 0.82]
-    Earthen: [0.70, 0.80]
-    Din Tai Fung Arcadia: [0.90, 0.60]
-    Howlin Rays: [0.88, 0.55]
-    Golden Deli: [0.74, 0.65]
-    New Capital: [0.72, 0.68]
+    Sea Harbour Seafood: [0.84, 0.76]
+    101 Noodle Express: [0.76, 0.70]
+    Chengdu Taste: [0.44, 0.64]
+    Earthen: [0.40, 0.56]
+    Din Tai Fung Arcadia: [0.80, 0.20]
+    Howlin Rays: [0.76, 0.10]
+    Golden Deli: [0.48, 0.30]
+    New Capital: [0.44, 0.36]
 ```
 
 ### XHS Score Algorithm
