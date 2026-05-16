@@ -143,10 +143,10 @@ quadrantChart
     title Restaurant Authenticity Quadrants
     x-axis Low Google Score --> High Google Score
     y-axis Low XHS Score --> High XHS Score
-    quadrant-1 华人必打卡 🔥
-    quadrant-2 隐藏宝藏 💎
-    quadrant-3 普通推荐 ⭐
-    quadrant-4 网红店慎入 ⚠️
+    quadrant-1 Must Visit
+    quadrant-2 Hidden Gem
+    quadrant-3 General Rec
+    quadrant-4 Overhyped
     Sea Harbour Seafood: [0.92, 0.90]
     101 Noodle Express: [0.88, 0.88]
     Chengdu Taste: [0.72, 0.82]
