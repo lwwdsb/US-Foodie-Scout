@@ -1,0 +1,29 @@
+# Web Framework
+fastapi>=0.115.0
+uvicorn[standard]>=0.32.0
+
+# Data Validation
+pydantic>=2.10.0
+pydantic-settings>=2.6.0
+
+# LangChain Agent (flexible — let pip resolve compatible set)
+langchain>=0.3.13
+langchain-core>=1.0.0
+langchain-openai>=0.3.0
+
+# Redis
+redis>=5.2.0
+
+# HTTP Client
+httpx>=0.28.0
+
+# SSE Streaming
+sse-starlette>=2.1.0
+
+# Utilities
+python-dotenv>=1.0.0
+python-multipart>=0.0.20
+
+# XHS data (Option A — unofficial API wrapper, activate with XHS_USE_REAL=true)
+# Comment out if not using real XHS data.
+xhs>=3.0
