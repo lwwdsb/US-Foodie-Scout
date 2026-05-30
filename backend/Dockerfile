@@ -10,6 +10,7 @@ COPY agent ./agent
 COPY core ./core
 COPY schemas ./schemas
 COPY tools ./tools
+COPY data ./data
 COPY main.py .
 
 EXPOSE 8000

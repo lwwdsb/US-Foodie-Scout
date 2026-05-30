@@ -209,9 +209,24 @@ async def _fetch_places(
         from tools.google_places_mock import search_restaurants as _search
         _search_live = None
     results = await _search(query=query, budget=budget, cuisine=cuisine, area=area)
+    area_miss = area and not results  # area was specified but nothing matched
 
-    # Live fallback: if static DB returns nothing, query Google Places API in real time
-    if not results and _search_live:
+    # Live fallback path 1: area was specified but static DB has no restaurants there
+    # → try live Google (which knows the real geography) before soft-relaxing to full DB
+    if area and _search_live:
+        from tools.google_places_mock import _matches_area
+        from tools.google_places import _load
+        area_matched = [p for p in _load() if _matches_area(p, area)]
+        if not area_matched:
+            logging.getLogger(__name__).info(
+                "Area %r not in static DB — trying live Google search", area
+            )
+            live = await _search_live(query=query, budget=budget, area=area)
+            if live:
+                results = live
+
+    # Live fallback path 2: no results at all (non-area miss)
+    elif not results and _search_live:
         logging.getLogger(__name__).info("Static DB miss for %r — trying live Google search", query)
         results = await _search_live(query=query, budget=budget, area=area)
 
@@ -383,7 +398,12 @@ async def run_agent_stream(
     try:
         # ── Step 0: Intent extraction (degrades to raw message on failure) ─────
         from agent.intent_rewrite import extract_intent
-        intent = await extract_intent(message, ui_budget=budget, ui_cuisine=cuisine)
+        intent = await extract_intent(
+            message,
+            ui_budget=budget,
+            ui_cuisine=cuisine,
+            history=history,
+        )
 
         # Named-restaurant query → search by name (skip keyword filtering, keep
         # the out-of-DB live fallback). Otherwise drive search from intent fields.
@@ -436,7 +456,7 @@ async def run_agent_stream(
 
         # ── Step 4: LLM generates recommendation text (real SSE streaming) ─────
         context = _build_context_for_llm(message, places, xhs_map, xhs_available)
-        chat_history = _to_messages(history[-6:])  # last 3 turns for context
+        chat_history = _to_messages(history[-12:])  # last 6 turns for context
 
         llm = build_llm(streaming=True)
         prompt_messages = [

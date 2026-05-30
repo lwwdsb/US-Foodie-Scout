@@ -472,15 +472,32 @@ def _matches_cuisine(place: PlaceResult, cuisine: Optional[str]) -> bool:
 # Area groups → constituent city/neighborhood substrings (matched against address + keywords).
 # Lets a fuzzy "SGV" / "华人区" query resolve to the right cities.
 _AREA_ALIASES = {
+    # SGV / Chinese community
     "sgv": ["alhambra", "san gabriel", "monterey park", "arcadia", "rosemead",
             "temple city", "el monte", "san marino"],
     "san gabriel valley": ["alhambra", "san gabriel", "monterey park", "arcadia",
                            "rosemead", "temple city", "el monte", "san marino"],
     "华人区": ["alhambra", "san gabriel", "monterey park", "arcadia", "rosemead",
               "temple city", "rowland heights", "irvine"],
+    # Downtown / central LA
     "dtla": ["downtown", "los angeles"],
     "downtown": ["downtown", "los angeles"],
+    # Koreatown / mid-city
     "ktown": ["koreatown", "los angeles"],
+    "koreatown": ["koreatown", "los angeles"],
+    "mid-city": ["mid-wilshire", "los angeles"],
+    # USC / South LA
+    "usc": ["los angeles", "exposition park", "university park", "south los angeles"],
+    "south la": ["los angeles", "south los angeles", "compton", "inglewood"],
+    # Westside
+    "westside": ["west los angeles", "santa monica", "culver city", "venice", "brentwood"],
+    "west la": ["west los angeles", "santa monica", "culver city"],
+    # Other cities
+    "rowland heights": ["rowland heights"],
+    "irvine": ["irvine"],
+    "pasadena": ["pasadena"],
+    "beverly hills": ["beverly hills"],
+    "hollywood": ["hollywood", "west hollywood"],
 }
 
 

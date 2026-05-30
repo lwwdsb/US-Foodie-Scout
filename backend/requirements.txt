@@ -27,6 +27,4 @@ python-multipart>=0.0.20
 # Tavily — web search fallback for XHS sentiment (activate with TAVILY_API_KEY in .env)
 tavily-python>=0.5.0
 
-# XHS data (Option A — unofficial API wrapper, activate with XHS_USE_REAL=true)
-# Comment out if not using real XHS data.
-xhs>=3.0
+# XHS unofficial API wrapper intentionally removed — causes account bans (see memory).
