@@ -30,13 +30,13 @@ Every restaurant gets a **dual badge**:
 
 ## Features
 
-- **Natural language queries** in Chinese or English: "想吃辣的火锅，SGV，别太贵"
-- **Intent extraction** (DeepSeek JSON mode) → structured filters: cuisine, price, area, authenticity preference
-- **Conversation-aware**: "有没有近一点的" inherits context from previous turn; "换几家" excludes already-shown restaurants
-- **Smart fallback chain**: static DB → live Google Places → Tavily web search for XHS sentiment
-- **Google Maps** with custom markers, info windows, auto-fit bounds
-- **Hover popover** on cards shows full review snippets (XHS batch or Tavily web)
-- **Chinese IME support** — Enter during Pinyin composition doesn't submit
+- **Structured intent extraction** — DeepSeek JSON mode rewrites fuzzy NL queries into `{cuisine, price, area, authenticity_pref, keywords, exclude_names}` before hitting the search layer; degrades to raw-query passthrough on failure with zero pipeline disruption
+- **Conversation-aware retrieval** — last 4 turns passed to the intent extractor so refine queries ("有没有近一点的") inherit previous area/cuisine; "换几家" triggers exclude_names extraction from history, bypassing the cache to prevent stale results
+- **Multi-tier fallback chain** — static DB (87 restaurants) → area-miss or thin results (< 3) → live Google Places API → supplements rather than replaces, deduped by place_id + name
+- **Offline XHS pipeline** — 8,604 notes scraped via 八爪鱼 desktop client (template 2996), ingested and deduplicated by note URL; likes-primary scoring formula since saves are structurally uncollectable from search-list cards
+- **Tavily web search fallback** — when a restaurant has no XHS batch data, Tavily queries return Chinese-community snippets filtered by `_is_relevant()` (blocks hotel-record spam, requires food signal or restaurant name match) before LLM synthesis
+- **LLM grounding** — when a named restaurant isn't found in the returned results, a `not_found_name` note is injected into the LLM context to prevent parametric-memory hallucination about the missing restaurant
+- **Area alias expansion** — "SGV" expands to 8 San Gabriel Valley cities; "USC" maps to University Park / Exposition Park (deliberately excludes "Los Angeles" to avoid matching the entire database)
 
 ---
 
