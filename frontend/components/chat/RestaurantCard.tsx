@@ -143,11 +143,6 @@ export function RestaurantCard({ card, lang, index, isSelected, onSelect }: Prop
               {lang === "zh" ? "小红书" : "XHS"} {card.xhs_post_count} {tr.posts}
             </Badge>
           )}
-          {hasReviews && (
-            <Badge variant="secondary" className="text-xs text-rose-500">
-              💬 {lang === "zh" ? "悬停查看评价" : "Hover for reviews"}
-            </Badge>
-          )}
         </div>
 
         {card.highlight && (
