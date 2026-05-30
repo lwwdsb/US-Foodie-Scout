@@ -33,8 +33,9 @@ services:
     build:
       context: ./frontend
       args:
-        # Backend is accessed from the browser, so use the host-facing address
-        NEXT_PUBLIC_API_URL: http://localhost:8000
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+        NEXT_PUBLIC_GOOGLE_MAPS_KEY: ${NEXT_PUBLIC_GOOGLE_MAPS_KEY:-}
+        NEXT_PUBLIC_GOOGLE_MAPS_ID: ${NEXT_PUBLIC_GOOGLE_MAPS_ID:-DEMO_MAP_ID}
     ports:
       - "3000:3000"
     depends_on:

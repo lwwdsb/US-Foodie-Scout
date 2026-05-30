@@ -1,497 +1,158 @@
-# US Foodie Scout 🔍🍜
+# 🕵️ 北美华人美食侦探 · US Foodie Scout
 
-> **北美华人美食侦探** — AI-powered restaurant discovery platform for the Chinese community in Los Angeles
+> AI-powered restaurant discovery for the LA Chinese community — combining real Google ratings with authentic 小红书 (XHS) community sentiment.
 
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.115-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
-[![Next.js](https://img.shields.io/badge/Next.js-16-black?logo=next.js)](https://nextjs.org)
-[![Python](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)](https://python.org)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white)](https://typescriptlang.org)
-[![Redis](https://img.shields.io/badge/Redis-7-DC382D?logo=redis&logoColor=white)](https://redis.io)
-[![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white)](https://docs.docker.com/compose)
+[![Python](https://img.shields.io/badge/Python-3.12-blue?logo=python)](https://python.org)
+[![Next.js](https://img.shields.io/badge/Next.js-15-black?logo=nextdotjs)](https://nextjs.org)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.115-009688?logo=fastapi)](https://fastapi.tiangolo.com)
+[![DeepSeek](https://img.shields.io/badge/LLM-DeepSeek-purple)](https://platform.deepseek.com)
 
 ---
 
-## Overview
+## What It Does
 
-US Foodie Scout bridges two data worlds that most English-first apps ignore: **Google Maps** (broad coverage, tourist-skewed) and **Xiaohongshu / RedNote** (小红书, China's leading lifestyle social platform). By cross-referencing both, the app surfaces an authenticity score that answers the question Chinese expats actually ask — *"Is this place legitimately good, or just Instagram-famous?"*
+US Foodie Scout helps LA's Chinese community find restaurants by combining two data sources most apps ignore together:
 
-Users interact through a natural-language chat interface. The backend runs a deterministic three-step AI pipeline: search → sentiment enrichment → streaming LLM narration. Results appear as restaurant cards with dual Google/XHS score bars, a photo strip, and an authenticity quadrant tag.
+- 🔵 **Google Places** — real ratings, addresses, price levels
+- 🌸 **小红书 (XHS)** — authentic Chinese community sentiment, scraped offline via 八爪鱼
+
+Every restaurant gets a **dual badge**:
+
+| Badge | Meaning |
+|-------|---------|
+| 🔥 华人必打卡 | Google ≥ 75 AND XHS ≥ 70 — community-verified |
+| 💎 隐藏宝藏 | XHS ≥ 70, Google lower — hidden gem locals love |
+| ⚠️ 网红店慎入 | Google ≥ 75, XHS lower — possible tourist trap |
+| ⭐ 普通推荐 | Both average |
+| 🔍 网络口碑 | Out-of-database restaurant, evaluated via live web search |
 
 ---
 
 ## Features
 
-| Feature | Detail |
-|---|---|
-| 🤖 **AI Chat Agent** | Natural-language queries in Chinese or English; streaming SSE responses |
-| 📊 **Dual-Score System** | Google Places score (0–100) × XHS community sentiment score (0–100) |
-| 🏷️ **Authenticity Quadrants** | 4 tags: 华人必打卡 / 隐藏宝藏 / 网红店慎入 / 普通推荐 |
-| 🗺️ **Live Map Sync** | Leaflet map pins sync with selected restaurant card |
-| 🖼️ **Real Restaurant Photos** | Yelp Fusion API — actual restaurant photos, not stock images |
-| ⚡ **Redis Caching** | 24h places cache, 6h XHS cache — near-zero latency on repeat queries |
-| 🛡️ **Rate Limiting** | Sliding-window rate limiter (5 req / 60s per IP) backed by Redis |
-| 🔌 **Circuit Breaker** | Auto-isolates failing external services; graceful fallback |
-| 🌐 **i18n** | Full Chinese / English UI toggle |
-| 🐳 **Docker Compose** | One command to run the full stack locally |
-
----
-
-## System Architecture
-
-```mermaid
-graph TB
-    subgraph Client["Browser"]
-        UI["Next.js 16\nChat + Map UI"]
-    end
-
-    subgraph Backend["FastAPI Backend (Python 3.12)"]
-        API["POST /chat\nSSE Streaming"]
-        RL["Rate Limiter\n5 req/60s"]
-        CB["Circuit Breaker"]
-        AGENT["3-Step Pipeline"]
-        
-        subgraph Pipeline["Agent Pipeline"]
-            S1["① Search\nRestaurants"]
-            S2["② XHS Sentiment\n+ Yelp Photos\n(parallel)"]
-            S3["③ LLM Narration\nStreaming"]
-            S1 --> S2 --> S3
-        end
-    end
-
-    subgraph DataSources["Data Sources"]
-        GP["Google Places\n(Mock → Real API)"]
-        XHS["Xiaohongshu\n(Algorithm-scored mock)"]
-        YELP["Yelp Fusion API\n(Real photos)"]
-        DS["DeepSeek LLM\nOpenAI-compatible"]
-    end
-
-    subgraph Infra["Infrastructure"]
-        REDIS["Redis 7\nSession + Cache"]
-    end
-
-    UI -->|"HTTP SSE"| API
-    API --> RL --> CB --> AGENT
-    AGENT --> Pipeline
-    S1 -->|"place search"| GP
-    S2 -->|"sentiment"| XHS
-    S2 -->|"photo URL"| YELP
-    S3 -->|"streaming tokens"| DS
-    AGENT <-->|"cache R/W"| REDIS
-    API <-->|"session history"| REDIS
-```
-
----
-
-## Request Flow
-
-```mermaid
-sequenceDiagram
-    participant U as User Browser
-    participant N as Next.js
-    participant F as FastAPI
-    participant R as Redis
-    participant G as Google Places
-    participant X as XHS (Mock)
-    participant Y as Yelp API
-    participant L as DeepSeek LLM
-
-    U->>N: Type query (e.g. "SGV附近好吃的面")
-    N->>F: POST /chat  {message, session_id}
-    F->>R: Rate limit check
-    F->>R: Load session history
-
-    Note over F: Step 1 — Place Search
-    F->>R: Cache lookup (places)
-    alt Cache miss
-        F->>G: search_restaurants(query)
-        G-->>F: 5 PlaceResult objects
-        F->>R: Cache write (24h TTL)
-    end
-
-    Note over F: Step 2 — Parallel Enrichment
-    par XHS sentiment (per restaurant)
-        F->>X: get_xhs_sentiment(name)
-        X-->>F: XHSSentimentResult
-    and Yelp photo (per restaurant)
-        F->>Y: GET /businesses/search
-        Y-->>F: image_url (S3)
-    end
-
-    Note over F: Step 3 — LLM Narration
-    F->>L: stream(system_prompt + data_context)
-    loop Token streaming
-        L-->>F: token chunk
-        F-->>N: SSE data: {type:"text", content}
-        N-->>U: Append to chat bubble
-    end
-
-    F-->>N: SSE data: {type:"cards", cards:[...]}
-    N-->>U: Render restaurant cards + map pins
-    F-->>N: SSE data: {type:"done"}
-
-    F->>R: Save session history
-```
-
----
-
-## Authenticity Scoring System
-
-The core insight: Google ratings are tourist-inclusive, XHS ratings reflect the **Chinese community's actual experience**. Cross-referencing the two creates a meaningful 2×2 matrix.
-
-```mermaid
-quadrantChart
-    title Restaurant Authenticity Quadrants (threshold = 75pts)
-    x-axis Low Google Score --> High Google Score
-    y-axis Low XHS Score --> High XHS Score
-    quadrant-1 Must Visit
-    quadrant-2 Hidden Gem
-    quadrant-3 General Rec
-    quadrant-4 Overhyped
-    Sea Harbour Seafood: [0.84, 0.76]
-    101 Noodle Express: [0.76, 0.70]
-    Chengdu Taste: [0.44, 0.64]
-    Earthen: [0.40, 0.56]
-    Din Tai Fung Arcadia: [0.80, 0.20]
-    Howlin Rays: [0.76, 0.10]
-    Golden Deli: [0.48, 0.30]
-    New Capital: [0.44, 0.36]
-```
-
-### XHS Score Algorithm
-
-The XHS score (0–100) is computed from three weighted components — not hardcoded:
-
-```
-score = volume_score(0–40) + engagement_score(0–40) + sentiment_score(0–20)
-
-volume_score    = min(40, log(1 + post_count) × 6.5)
-engagement_score = min(40, log(1 + saves×3 + likes + comments×0.5) × 5.5)
-sentiment_score  = clamp(10 + (pos_weight − neg_weight) × 0.8, 0, 20)
-```
-
-**Key insight on saves:** Saves are weighted 3× because disappointed diners don't bookmark places for future visits — low save-to-like ratios are a strong signal of overhyped restaurants.
+- **Natural language queries** in Chinese or English: "想吃辣的火锅，SGV，别太贵"
+- **Intent extraction** (DeepSeek JSON mode) → structured filters: cuisine, price, area, authenticity preference
+- **Conversation-aware**: "有没有近一点的" inherits context from previous turn; "换几家" excludes already-shown restaurants
+- **Smart fallback chain**: static DB → live Google Places → Tavily web search for XHS sentiment
+- **Google Maps** with custom markers, info windows, auto-fit bounds
+- **Hover popover** on cards shows full review snippets (XHS batch or Tavily web)
+- **Chinese IME support** — Enter during Pinyin composition doesn't submit
 
 ---
 
 ## Tech Stack
 
-### Backend
 | Layer | Technology |
-|---|---|
-| Web Framework | FastAPI 0.115 + uvicorn |
-| AI / LLM | LangChain 0.3 + DeepSeek (OpenAI-compatible) |
-| Streaming | Server-Sent Events (SSE) via `sse-starlette` |
-| Cache & Session | Redis 7 |
-| Resilience | Custom circuit breaker + sliding-window rate limiter |
-| Photos | Yelp Fusion API |
-| Data Validation | Pydantic v2 |
-| Testing | pytest + pytest-asyncio |
-
-### Frontend
-| Layer | Technology |
-|---|---|
-| Framework | Next.js 16 (App Router) + React 19 |
-| Language | TypeScript 5 |
-| Styling | Tailwind CSS v4 |
-| UI Components | shadcn/ui + Radix |
-| Map | Leaflet + react-leaflet |
-| i18n | Custom lightweight client |
+|-------|-----------|
+| Frontend | Next.js 15, Tailwind CSS, `@vis.gl/react-google-maps` |
+| Backend | FastAPI, LangChain, DeepSeek API |
+| Data | Google Places API (New), 八爪鱼 XHS scraping, Tavily web search |
+| Cache | Redis — sessions, rate limiting, Places cache |
+| Deployment | Vercel (frontend) + Railway (backend + Redis) |
 
 ---
 
-## Project Structure
+## Dataset
+
+- **87 restaurants** in `data/restaurants.json` — real Google Places data, LA area, SGV-focused
+- **102 restaurants / 8,604 notes** in `data/xhs_notes.json` — authentic XHS community data
+- Coverage: SGV Chinese restaurants + 28 American-local LA favorites (In-N-Out, Bestia, Langer's Deli, Guelaguetza, Jitlada, etc.)
+
+---
+
+## Architecture
 
 ```
-US Foodie Scout/
-├── .env.example              # Environment variable template (copy → .env)
-├── .gitignore
-├── docker-compose.yml        # Full-stack: Redis + Backend + Frontend
-│
-├── backend/
-│   ├── main.py               # FastAPI app, /chat SSE endpoint, session management
-│   ├── requirements.txt
-│   ├── Dockerfile
-│   │
-│   ├── agent/
-│   │   └── react_agent.py    # 3-step deterministic pipeline + LLM streaming
-│   │
-│   ├── core/
-│   │   ├── config.py         # Pydantic settings (reads from .env)
-│   │   ├── rate_limiter.py   # Redis sliding-window rate limiter
-│   │   └── circuit_breaker.py
-│   │
-│   ├── schemas/
-│   │   └── models.py         # RestaurantCard, ChatRequest, AuthenticityTag
-│   │
-│   ├── tools/
-│   │   ├── google_places_mock.py   # Mock Google Places (28 LA restaurants)
-│   │   ├── xhs_sentiment_mock.py   # Mock XHS with algorithm-computed scores
-│   │   ├── xhs_scorer.py           # Volume × Engagement × Sentiment formula
-│   │   ├── xhs_sentiment.py        # Real XHS client (needs cookie)
-│   │   ├── xhs_client.py
-│   │   └── yelp_photos.py          # Yelp Fusion photo fetcher
-│   │
-│   └── tests/
-│       ├── unit/             # XHS scorer, mock data, circuit breaker, models
-│       └── integration/      # API endpoint tests
-│
-└── frontend/
-    ├── app/
-    │   ├── page.tsx          # Root layout: ChatPanel + MapPanel split view
-    │   └── layout.tsx
-    │
-    ├── components/
-    │   ├── chat/
-    │   │   ├── ChatPanel.tsx       # Chat input + message thread
-    │   │   ├── RestaurantCard.tsx  # Score bars, photo, quadrant tag, CTA
-    │   │   └── MessageBubble.tsx
-    │   ├── map/
-    │   │   └── MapPanel.tsx        # Leaflet map, synced pins
-    │   └── layout/
-    │       └── LanguageToggle.tsx  # ZH/EN switcher
-    │
-    ├── hooks/
-    │   ├── useChat.ts        # SSE streaming consumer, card parsing
-    │   └── useSession.ts     # UUID session management
-    │
-    └── lib/
-        ├── types.ts          # RestaurantCard, AuthenticityTag TypeScript types
-        ├── api.ts            # Fetch wrapper for /chat
-        └── i18n.ts           # Translation strings
+User Query (natural language)
+  ↓
+Step 0: Intent Extraction  (DeepSeek JSON mode, with conversation history)
+        → {restaurant_name, cuisine, price, area, pref, keywords, exclude_names}
+  ↓
+Step 1: Restaurant Search
+        Static DB (87 restaurants)
+        → area not covered / thin results / zero → live Google Places API
+  ↓
+Step 2: XHS Sentiment  (parallel, with Yelp photo overlay)
+        Batch data (xhs_notes.json)
+        → not found → Tavily web search fallback (spam-filtered)
+  ↓
+Step 3: LLM Recommendation  (DeepSeek streaming SSE)
+        Strict: only recommends restaurants in provided data
+  ↓
+Frontend: cards + Google Maps
 ```
 
 ---
 
-## Getting Started
+## Local Development
 
 ### Prerequisites
+- Python 3.12, Node.js 20
+- Redis: `brew install redis && brew services start redis`
+- API keys: DeepSeek, Google Places (backend), Google Maps JS (frontend), Tavily
 
-- Python 3.12+
-- Node.js 20+
-- Redis 7 (or Docker)
-- [DeepSeek API key](https://platform.deepseek.com) — free tier available
-- [Yelp Fusion API key](https://www.yelp.com/developers/v3/manage_app) — free, no billing required
-
-### Option A — Local Development
-
-**1. Clone and configure environment**
-
-```bash
-git clone https://github.com/your-username/us-foodie-scout.git
-cd us-foodie-scout
-
-cp .env.example .env
-# Edit .env — fill in DEEPSEEK_API_KEY and YELP_API_KEY at minimum
-```
-
-**2. Start Redis**
-
-```bash
-# With Docker (easiest):
-docker run -d -p 6379:6379 redis:7-alpine
-
-# Or with Homebrew (macOS):
-brew services start redis
-```
-
-**3. Backend**
+### Backend
 
 ```bash
 cd backend
-python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-
-PYTHONPATH=. uvicorn main:app --reload
-# → http://localhost:8000
-# → http://localhost:8000/docs  (Swagger UI)
+cp .env.example .env   # fill in your keys
+uvicorn main:app --reload --port 8000
 ```
 
-**4. Frontend**
+### Frontend
 
 ```bash
 cd frontend
 npm install
+# create frontend/.env.local with:
+# NEXT_PUBLIC_API_URL=http://localhost:8000
+# NEXT_PUBLIC_GOOGLE_MAPS_KEY=your_key
+# NEXT_PUBLIC_GOOGLE_MAPS_ID=DEMO_MAP_ID
 npm run dev
-# → http://localhost:3000
 ```
 
-### Option B — Docker Compose (Full Stack)
+Open [http://localhost:3000](http://localhost:3000)
+
+### Docker (all-in-one)
 
 ```bash
-cp .env.example .env
-# Edit .env with your API keys
-
 docker compose up --build
-# → Frontend: http://localhost:3000
-# → Backend:  http://localhost:8000
-# → Redis:    localhost:6379
-```
-
-### Running Tests
-
-```bash
-cd backend
-pip install -r requirements-test.txt
-pytest tests/ -v
 ```
 
 ---
 
 ## Environment Variables
 
-Copy `.env.example` to `.env` and fill in the required values.
+**Backend (`.env`)**
+```env
+DEEPSEEK_API_KEY=
+GOOGLE_API_KEY=           # Google Places API (New) — server side only
+TAVILY_API_KEY=           # Tavily web search fallback
+XHS_SOURCE=bazhuayu       # "mock" for development without XHS data
+GOOGLE_SOURCE=real        # "mock" for development without Google data
+XHS_HIGH_THRESHOLD=70
+REDIS_URL=redis://localhost:6379
+ALLOWED_ORIGINS=http://localhost:3000
+```
 
-| Variable | Required | Description |
-|---|---|---|
-| `DEEPSEEK_API_KEY` | ✅ | LLM API key — [get one free](https://platform.deepseek.com) |
-| `DEEPSEEK_MODEL` | — | Default: `deepseek-chat` |
-| `YELP_API_KEY` | ✅ | Restaurant photos — [get one free](https://www.yelp.com/developers/v3/manage_app) |
-| `REDIS_URL` | — | Default: `redis://localhost:6379` |
-| `RATE_LIMIT_REQUESTS` | — | Max requests per window. Default: `5` |
-| `RATE_LIMIT_WINDOW_SECONDS` | — | Rate limit window. Default: `60` |
-| `XHS_USE_REAL` | — | Set `true` to use live XHS data (requires cookie). Default: `false` |
-| `XHS_COOKIE` | — | XHS session cookie (see below) |
-| `ALLOWED_ORIGINS` | — | Comma-separated CORS origins for production |
-| `GOOGLE_PLACES_API_KEY` | — | For real place search (mock used when absent) |
-
-> **XHS Real Data Note:** The app ships with algorithm-scored mock data covering 28 restaurants across SGV, DTLA, Koreatown, Rowland Heights, and Irvine. To enable live XHS scraping, set `XHS_USE_REAL=true` and provide a valid `XHS_COOKIE` from an active session at xiaohongshu.com.
+**Frontend (`frontend/.env.local`)**
+```env
+NEXT_PUBLIC_API_URL=http://localhost:8000
+NEXT_PUBLIC_GOOGLE_MAPS_KEY=    # Google Maps JavaScript API (HTTP-referrer restricted)
+NEXT_PUBLIC_GOOGLE_MAPS_ID=DEMO_MAP_ID
+```
 
 ---
 
-## API Reference
+## Data Collection
 
-### `POST /chat`
+XHS data is collected offline via **八爪鱼 (Octoparse) desktop client** (template 2996, local QR login with a secondary account). Do NOT use the `xhs` PyPI package — it triggers immediate account bans.
 
-Streaming SSE endpoint. Returns a sequence of events:
-
-```bash
-curl -X POST http://localhost:8000/chat \
-  -H "Content-Type: application/json" \
-  -d '{"message": "SGV附近好吃的早茶", "session_id": "abc123", "lang": "zh"}'
-```
-
-**Request body**
-
-```jsonc
-{
-  "message": "SGV附近好吃的早茶",  // required, max 500 chars
-  "session_id": "abc123",          // required — persist across turns for context
-  "lang": "zh",                    // "zh" | "en"
-  "budget": "$$",                  // optional: "$" | "$$" | "$$$" | "$$$$"
-  "cuisine": "粤式"                // optional: free-text cuisine filter
-}
-```
-
-**SSE event stream**
-
-```
-data: {"type": "text", "content": "根据你的"}
-data: {"type": "text", "content": "需求，推荐…"}
-data: {"type": "cards", "cards": [{...}, {...}]}
-data: {"type": "done"}
-```
-
-**RestaurantCard schema**
-
-```jsonc
-{
-  "name": "Sea Harbour Seafood Restaurant",
-  "name_zh": "海港海鲜酒家",
-  "address": "3939 Rosemead Blvd, Rosemead, CA 91770",
-  "lat": 34.073,
-  "lng": -118.0789,
-  "google_score": 92.0,          // 0-100
-  "xhs_score": 88.4,             // 0-100, algorithm-computed
-  "price_level": "$$",
-  "authenticity_tag": "华人必打卡",
-  "cuisine_type": "粤式早茶",
-  "google_maps_url": "https://maps.google.com/...",
-  "xhs_post_count": 2187,
-  "photo_url": "https://s3-media0.fl.yelpcdn.com/...",
-  "highlight": "LA最强早茶、虾饺无敌、必点流沙包"
-}
-```
-
-### `GET /health`
-
-```json
-{"status": "ok", "redis": true, "version": "0.1.0"}
-```
-
-### `GET /session/{session_id}/history`
-
-Returns the conversation history for a session.
-
-### `DELETE /session/{session_id}`
-
-Clears a session's conversation history from Redis.
-
----
-
-## Deployment
-
-### Recommended Stack
-
-| Service | Platform | Notes |
-|---|---|---|
-| Frontend | [Vercel](https://vercel.com) | Set `NEXT_PUBLIC_API_URL` to your backend URL |
-| Backend | [Railway](https://railway.app) or [Render](https://render.com) | Add all env vars in the dashboard |
-| Redis | Railway Redis plugin or [Upstash](https://upstash.com) | Free tier sufficient |
-
-### Vercel (Frontend)
-
-```bash
-cd frontend
-npx vercel --prod
-# Set environment variable:
-# NEXT_PUBLIC_API_URL = https://your-backend.railway.app
-```
-
-### Railway (Backend + Redis)
-
-1. New Project → Deploy from GitHub repo
-2. Select `backend/` as root directory
-3. Add environment variables from `.env.example`
-4. Add a Redis plugin — Railway auto-injects `REDIS_URL`
-
----
-
-## Coverage — LA Restaurant Areas
-
-The mock dataset covers 28 restaurants across 5 areas with all four authenticity quadrants represented:
-
-| Area | Restaurants | Highlights |
-|---|---|---|
-| SGV / Alhambra / Arcadia | 11 | 101 Noodle, Sea Harbour, Din Tai Fung, Haidilao |
-| Monterey Park / Rosemead | 3 | Elite Restaurant, Huge Tree Pastry |
-| DTLA / Chinatown / Little Tokyo | 4 | Yang Chow, Sushi Gen, Howlin' Ray's |
-| Koreatown / USC | 4 | Park's BBQ, Kang Ho-dong, Broken Mouth |
-| Rowland Heights 罗兰岗 | 4 | Earthen, Hui Tou Xiang, Yi Mei Deli |
-| Irvine 尔湾 | 5 | Shabu Zone, Newport Seafood, Ling's Garden |
-
----
-
-## Roadmap
-
-- [ ] Real Google Places API integration (swap mock with live data)
-- [ ] Google Maps JS embed (replace Leaflet)
-- [ ] Persistent user favorites
-- [ ] More cities: San Francisco Bay Area, New York Flushing
-- [ ] Real-time XHS scraping via Playwright (stable alternative to cookie auth)
-- [ ] Mobile-responsive layout
-- [ ] CI/CD pipeline (GitHub Actions → Vercel/Railway)
-
----
-
-## Contributing
-
-Pull requests welcome. For major changes, open an issue first to discuss what you'd like to change.
-
-```bash
-# Run tests before submitting
-cd backend && pytest tests/ -v
-cd frontend && npm run lint
-```
+Scripts in `backend/scripts/`:
+- `xhs_watch.py` — merge new 八爪鱼 CSV exports into `xhs_notes.json`
+- `enrich_google.py` — enrich restaurants with Google Places data
+- `ingest_xhs_export.py` — convert 八爪鱼 exports to normalized JSON
 
 ---
 
