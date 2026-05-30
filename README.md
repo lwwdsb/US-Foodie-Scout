@@ -2,10 +2,15 @@
 
 > AI-powered restaurant discovery for the LA Chinese community — combining real Google ratings with authentic 小红书 (XHS) community sentiment.
 
+### 🌐 [**Live Demo → us-foodie-scout.vercel.app**](https://us-foodie-scout.vercel.app)
+
+[![Live Demo](https://img.shields.io/badge/demo-live-brightgreen)](https://us-foodie-scout.vercel.app)
 [![Python](https://img.shields.io/badge/Python-3.12-blue?logo=python)](https://python.org)
 [![Next.js](https://img.shields.io/badge/Next.js-15-black?logo=nextdotjs)](https://nextjs.org)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115-009688?logo=fastapi)](https://fastapi.tiangolo.com)
 [![DeepSeek](https://img.shields.io/badge/LLM-DeepSeek-purple)](https://platform.deepseek.com)
+
+> Frontend on Vercel · Backend + Redis on Railway
 
 ---
 
