@@ -17,11 +17,20 @@ settings = get_settings()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Redis is a soft dependency — every call site fails open. Don't let an
+    # unreachable Redis crash startup (e.g. before the Redis service is wired
+    # in a fresh deploy). Log and continue.
     redis = await get_redis()
-    await redis.ping()
-    print(f"✅ Redis connected: {settings.redis_url}")
+    try:
+        await redis.ping()
+        print(f"✅ Redis connected: {settings.redis_url}")
+    except Exception as e:
+        logger.warning("⚠️ Redis not reachable at startup (%s): %s — continuing without cache", settings.redis_url, e)
     yield
-    await redis.aclose()
+    try:
+        await redis.aclose()
+    except Exception:
+        pass
 
 
 app = FastAPI(
