@@ -1,8 +1,55 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useState, useEffect } from "react";
+import {
+  APIProvider,
+  Map,
+  AdvancedMarker,
+  InfoWindow,
+  useMap,
+} from "@vis.gl/react-google-maps";
 import type { RestaurantCard, Language } from "@/lib/types";
 import { TAG_CONFIG } from "@/lib/types";
 import { t } from "@/lib/i18n";
+
+const SGV_CENTER = { lat: 34.0953, lng: -118.1347 };
+const MAPS_KEY = process.env.NEXT_PUBLIC_GOOGLE_MAPS_KEY ?? "";
+const MAP_ID = process.env.NEXT_PUBLIC_GOOGLE_MAPS_ID ?? "DEMO_MAP_ID";
+
+// Must live inside <Map> to call useMap()
+function MapController({
+  cards,
+  selectedCardName,
+}: {
+  cards: RestaurantCard[];
+  selectedCardName?: string | null;
+}) {
+  const map = useMap();
+
+  // Fit bounds whenever cards change
+  useEffect(() => {
+    if (!map) return;
+    if (cards.length === 0) {
+      map.setCenter(SGV_CENTER);
+      map.setZoom(12);
+      return;
+    }
+    const bounds = new window.google.maps.LatLngBounds();
+    cards.forEach((c) => bounds.extend({ lat: c.lat, lng: c.lng }));
+    map.fitBounds(bounds, 60);
+  }, [map, cards]);
+
+  // Pan + zoom when a card is selected from the list
+  useEffect(() => {
+    if (!map || !selectedCardName) return;
+    const card = cards.find((c) => c.name === selectedCardName);
+    if (card) {
+      map.panTo({ lat: card.lat, lng: card.lng });
+      map.setZoom(16);
+    }
+  }, [map, selectedCardName, cards]);
+
+  return null;
+}
 
 interface Props {
   cards: RestaurantCard[];
@@ -12,187 +59,16 @@ interface Props {
   isVisible?: boolean;
 }
 
-// SGV center coordinates
-const SGV_CENTER: [number, number] = [34.0953, -118.1347];
-const DEFAULT_ZOOM = 12;
-
-export function MapPanel({ cards, lang, selectedCardName, onCardSelect, isVisible }: Props) {
-  const mapRef = useRef<HTMLDivElement>(null);
-  const leafletMapRef = useRef<import("leaflet").Map | null>(null);
-  const markersRef = useRef<import("leaflet").Marker[]>([]);
-  // name → marker lookup for flyTo
-  const markerByNameRef = useRef<Map<string, import("leaflet").Marker>>(new Map());
-  const initStartedRef = useRef(false);
-  // true once Leaflet has created the map — triggers markers effect after deferred init
-  const [mapReady, setMapReady] = useState(false);
+export function MapPanel({ cards, lang, selectedCardName, onCardSelect }: Props) {
   const tr = t(lang);
+  const [activeCard, setActiveCard] = useState<RestaurantCard | null>(null);
 
+  // Sync external card selection → open its info window
   useEffect(() => {
-    if (!mapRef.current) return;
-    const container = mapRef.current;
-
-    const init = () => {
-      if (container.offsetWidth === 0 || container.offsetHeight === 0) return;
-      if (initStartedRef.current) return;   // sync guard — set before async
-      initStartedRef.current = true;
-
-      import("leaflet").then((L) => {
-        // Check again after async — StrictMode double-invocation safety
-        if (leafletMapRef.current) return;
-
-        delete (L.Icon.Default.prototype as unknown as Record<string, unknown>)._getIconUrl;
-        L.Icon.Default.mergeOptions({
-          iconRetinaUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png",
-          iconUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png",
-          shadowUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png",
-        });
-
-        const map = L.map(container, { zoomControl: true }).setView(SGV_CENTER, DEFAULT_ZOOM);
-
-        L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-          attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
-          maxZoom: 19,
-        }).addTo(map);
-
-        leafletMapRef.current = map;
-        setMapReady(true);
-        setTimeout(() => map.invalidateSize(), 150);
-        setTimeout(() => map.invalidateSize(), 600);
-      });
-    };
-
-    const ro = new ResizeObserver(() => {
-      if (container.offsetHeight > 0) {
-        ro.disconnect();
-        init();
-      }
-    });
-    ro.observe(container);
-    init();
-
-    return () => {
-      ro.disconnect();
-      if (leafletMapRef.current) {
-        leafletMapRef.current.remove();
-        leafletMapRef.current = null;
-      }
-      initStartedRef.current = false;
-      setMapReady(false);
-    };
-  }, []);
-
-  // Call invalidateSize whenever the map tab becomes visible again
-  useEffect(() => {
-    if (isVisible && leafletMapRef.current) {
-      setTimeout(() => leafletMapRef.current?.invalidateSize(), 50);
-    }
-  }, [isVisible]);
-
-  // Update markers when cards change — also re-runs when mapReady flips true,
-  // so markers are populated even if cards arrived while the map was hidden.
-  useEffect(() => {
-    if (!mapReady || !leafletMapRef.current) return;
-
-    import("leaflet").then((L) => {
-      const map = leafletMapRef.current!;
-
-      // Clear old markers
-      markersRef.current.forEach((m) => m.remove());
-      markersRef.current = [];
-      markerByNameRef.current.clear();
-
-      if (cards.length === 0) {
-        map.setView(SGV_CENTER, DEFAULT_ZOOM);
-        return;
-      }
-
-      const bounds: [number, number][] = [];
-
-      cards.forEach((card, i) => {
-        const cfg = TAG_CONFIG[card.authenticity_tag];
-
-        // Custom colored icon using div
-        const icon = L.divIcon({
-          className: "",
-          html: `
-            <div style="
-              background: white;
-              border: 2px solid #3b82f6;
-              border-radius: 50% 50% 50% 0;
-              transform: rotate(-45deg);
-              width: 32px; height: 32px;
-              display: flex; align-items: center; justify-content: center;
-              box-shadow: 0 2px 6px rgba(0,0,0,0.25);
-            ">
-              <span style="transform: rotate(45deg); font-size: 14px;">${cfg.emoji}</span>
-            </div>
-            <div style="
-              position: absolute; top: -8px; left: 50%; transform: translateX(-50%);
-              background: #1d4ed8; color: white; border-radius: 10px;
-              font-size: 10px; font-weight: bold; padding: 0 5px;
-              white-space: nowrap;
-            ">#${i + 1}</div>
-          `,
-          iconSize: [32, 40],
-          iconAnchor: [16, 40],
-          popupAnchor: [0, -42],
-        });
-
-        const marker = L.marker([card.lat, card.lng], { icon })
-          .addTo(map)
-          .bindPopup(`
-            <div style="min-width: 180px; font-family: system-ui;">
-              <strong style="font-size: 13px;">${card.name_zh ?? card.name}</strong>
-              <div style="margin-top: 4px; font-size: 11px; color: #6b7280;">${card.address}</div>
-              <div style="margin-top: 6px; display: flex; gap: 8px; font-size: 11px;">
-                <span>🔵 Google <b>${Math.round(card.google_score)}</b></span>
-                <span>🌸 小红书 <b>${Math.round(card.xhs_score)}</b></span>
-              </div>
-              <div style="margin-top: 6px;">
-                <span style="font-size: 11px; padding: 2px 6px; border-radius: 9999px; background: #fee2e2; color: #b91c1c;">
-                  ${cfg.emoji} ${cfg.label_zh}
-                </span>
-              </div>
-              <a href="${card.google_maps_url}" target="_blank" style="
-                display: block; margin-top: 8px; text-align: center;
-                background: #2563eb; color: white; border-radius: 6px;
-                padding: 4px 8px; font-size: 11px; text-decoration: none;
-              ">导航 →</a>
-            </div>
-          `);
-
-        markersRef.current.push(marker);
-        markerByNameRef.current.set(card.name, marker);
-        bounds.push([card.lat, card.lng]);
-      });
-
-      // Fit map to show all markers
-      if (bounds.length > 0) {
-        map.fitBounds(bounds, { padding: [40, 40], maxZoom: 15 });
-      }
-    });
-  }, [cards, mapReady]);
-
-  // Fly to selected card and open its popup
-  useEffect(() => {
-    if (!leafletMapRef.current) return;
-    const map = leafletMapRef.current;
-
-    if (!selectedCardName) {
-      // Deselected — fit all markers back
-      if (markersRef.current.length > 0) {
-        const bounds = markersRef.current.map((m) => m.getLatLng());
-        if (bounds.length > 0) map.fitBounds(bounds.map((b) => [b.lat, b.lng] as [number, number]), { padding: [40, 40], maxZoom: 15 });
-      }
-      return;
-    }
-
-    const marker = markerByNameRef.current.get(selectedCardName);
-    if (marker) {
-      map.flyTo(marker.getLatLng(), 16, { duration: 0.8 });
-      setTimeout(() => marker.openPopup(), 850);
-    }
-  }, [selectedCardName]);
+    setActiveCard(
+      selectedCardName ? (cards.find((c) => c.name === selectedCardName) ?? null) : null
+    );
+  }, [selectedCardName, cards]);
 
   return (
     <div className="flex flex-col h-full w-full bg-white">
@@ -205,9 +81,121 @@ export function MapPanel({ cards, lang, selectedCardName, onCardSelect, isVisibl
           </span>
         )}
       </div>
-      {/* Map wrapper: relative parent so absolute child fills it correctly */}
+
+      {/* Map */}
       <div className="relative flex-1 w-full">
-        <div ref={mapRef} className="absolute inset-0" />
+        <APIProvider apiKey={MAPS_KEY}>
+          <div className="absolute inset-0">
+            <Map
+              defaultCenter={SGV_CENTER}
+              defaultZoom={12}
+              mapId={MAP_ID}
+              gestureHandling="greedy"
+              disableDefaultUI={false}
+              style={{ width: "100%", height: "100%" }}
+            >
+              <MapController cards={cards} selectedCardName={selectedCardName} />
+
+              {cards.map((card, i) => {
+                const cfg = TAG_CONFIG[card.authenticity_tag];
+                const isActive = activeCard?.name === card.name;
+
+                return (
+                  <AdvancedMarker
+                    key={card.name}
+                    position={{ lat: card.lat, lng: card.lng }}
+                    onClick={() => {
+                      const next = isActive ? null : card;
+                      setActiveCard(next);
+                      if (next) onCardSelect?.(card.name);
+                    }}
+                  >
+                    {/* Custom pin: 32×48 container, pin tip at bottom-center */}
+                    <div style={{ position: "relative", width: 32, height: 48, cursor: "pointer" }}>
+                      {/* Number badge at top */}
+                      <div style={{
+                        position: "absolute", top: 0, left: "50%",
+                        transform: "translateX(-50%)",
+                        background: isActive ? "#dc2626" : "#1d4ed8",
+                        color: "white", borderRadius: 10,
+                        fontSize: 10, fontWeight: "bold",
+                        padding: "0 5px", lineHeight: "16px",
+                        whiteSpace: "nowrap", zIndex: 1,
+                      }}>
+                        #{i + 1}
+                      </div>
+                      {/* Diamond pin body at bottom */}
+                      <div style={{
+                        position: "absolute", bottom: 0, left: 0,
+                        width: 32, height: 32,
+                        background: "white",
+                        border: `2.5px solid ${isActive ? "#dc2626" : "#3b82f6"}`,
+                        borderRadius: "50% 50% 50% 0",
+                        transform: "rotate(-45deg)",
+                        boxShadow: "0 2px 8px rgba(0,0,0,0.25)",
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                      }}>
+                        <span style={{ transform: "rotate(45deg)", fontSize: 14 }}>
+                          {cfg.emoji}
+                        </span>
+                      </div>
+                    </div>
+                  </AdvancedMarker>
+                );
+              })}
+
+              {activeCard && (
+                <InfoWindow
+                  position={{ lat: activeCard.lat, lng: activeCard.lng }}
+                  onCloseClick={() => setActiveCard(null)}
+                >
+                  <div style={{ minWidth: 180, fontFamily: "system-ui", padding: "2px 4px" }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: "#111827" }}>
+                      {activeCard.name_zh ?? activeCard.name}
+                    </div>
+                    {activeCard.name_zh && (
+                      <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 2 }}>
+                        {activeCard.name}
+                      </div>
+                    )}
+                    <div style={{ fontSize: 11, color: "#6b7280", marginTop: 4 }}>
+                      {activeCard.address}
+                    </div>
+                    <div style={{ marginTop: 6, display: "flex", gap: 8, fontSize: 11 }}>
+                      <span>🔵 Google <b>{Math.round(activeCard.google_score)}</b></span>
+                      {activeCard.xhs_source !== "web_search" && (
+                        <span>🌸 小红书 <b>{Math.round(activeCard.xhs_score)}</b></span>
+                      )}
+                    </div>
+                    <div style={{ marginTop: 6 }}>
+                      <span style={{
+                        fontSize: 11, padding: "2px 6px", borderRadius: 9999,
+                        background: "#fee2e2", color: "#b91c1c",
+                      }}>
+                        {TAG_CONFIG[activeCard.authenticity_tag].emoji}{" "}
+                        {TAG_CONFIG[activeCard.authenticity_tag].label_zh}
+                      </span>
+                    </div>
+                    <a
+                      href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+                        activeCard.name + " " + activeCard.address
+                      )}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{
+                        display: "block", marginTop: 8, textAlign: "center",
+                        background: "#2563eb", color: "white", borderRadius: 6,
+                        padding: "4px 8px", fontSize: 11, textDecoration: "none",
+                      }}
+                    >
+                      导航 →
+                    </a>
+                  </div>
+                </InfoWindow>
+              )}
+            </Map>
+          </div>
+        </APIProvider>
       </div>
     </div>
   );
