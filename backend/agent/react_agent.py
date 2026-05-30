@@ -116,11 +116,11 @@ def _build_cards(
         src = xhs.get("xhs_source", "batch")
         if src == "batch":
             comment = (xhs.get("sample_comment") or "").strip()
-            return [comment[:120]] if comment else []
+            return [comment[:400]] if comment else []
         if src == "web_search":
             raw = xhs.get("web_snippets", "")
             snippets = [s.strip() for s in raw.split("\n---\n") if s.strip()]
-            return [s[:120] for s in snippets[:2]]
+            return [s[:400] for s in snippets[:2]]
         return []
 
     cards = []
