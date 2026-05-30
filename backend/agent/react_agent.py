@@ -212,17 +212,20 @@ async def _fetch_places(
     from core.rate_limiter import get_redis
 
     cache_key = _places_cache_key(query, budget, cuisine, area)
-    # exclude_names are session-specific — never cache results that have exclusions applied
+    # exclude_names are session-specific: skip cache entirely when exclusions are active
+    # so a cached full result set never bypasses the exclusion filter.
+    use_cache = not exclude_names
 
     # Cache read
-    try:
-        redis = await get_redis()
-        cached = await redis.get(cache_key)
-        if cached:
-            logging.getLogger(__name__).debug("Places cache hit: %s", cache_key)
-            return json.loads(cached)
-    except Exception as e:
-        logging.getLogger(__name__).warning("Places cache read failed: %s", e)
+    if use_cache:
+        try:
+            redis = await get_redis()
+            cached = await redis.get(cache_key)
+            if cached:
+                logging.getLogger(__name__).debug("Places cache hit: %s", cache_key)
+                return json.loads(cached)
+        except Exception as e:
+            logging.getLogger(__name__).warning("Places cache read failed: %s", e)
 
     # Cache miss — call data source (google_source: "mock" | "real")
     if settings.google_source == "real":
@@ -290,13 +293,14 @@ async def _fetch_places(
         for p in results
     ]
 
-    # Cache write
-    try:
-        redis = await get_redis()
-        await redis.setex(cache_key, settings.places_cache_ttl_seconds, json.dumps(places, ensure_ascii=False))
-        logging.getLogger(__name__).debug("Places cached (%ds TTL): %s", settings.places_cache_ttl_seconds, cache_key)
-    except Exception as e:
-        logging.getLogger(__name__).warning("Places cache write failed: %s", e)
+    # Cache write (skip when exclusions were applied — result is session-specific)
+    if use_cache:
+        try:
+            redis = await get_redis()
+            await redis.setex(cache_key, settings.places_cache_ttl_seconds, json.dumps(places, ensure_ascii=False))
+            logging.getLogger(__name__).debug("Places cached (%ds TTL): %s", settings.places_cache_ttl_seconds, cache_key)
+        except Exception as e:
+            logging.getLogger(__name__).warning("Places cache write failed: %s", e)
 
     return places
 
