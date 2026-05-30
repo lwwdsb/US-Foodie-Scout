@@ -34,7 +34,9 @@ export function ChatPanel({ messages, isLoading, lang, onSend, onClear, selected
   };
 
   const handleKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && !e.shiftKey) {
+    // e.nativeEvent.isComposing: true while IME (Chinese/Japanese/Korean) is composing
+    // a character — Enter during composition should confirm the word, not submit.
+    if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
       handleSend();
     }
