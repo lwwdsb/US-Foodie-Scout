@@ -91,5 +91,6 @@ class RestaurantCard(BaseModel):
     highlight: Optional[str] = None    # one-line reason from Agent
     # "batch" = from xhs_notes.json | "web_search" = Tavily fallback | "none" = no data
     xhs_source: str = "batch"
+    reviews: list[str] = Field(default_factory=list)  # 1-2 short user review snippets
 
 

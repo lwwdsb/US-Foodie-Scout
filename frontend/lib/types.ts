@@ -23,6 +23,7 @@ export interface RestaurantCard {
   photo_url: string | null;
   highlight: string | null;
   xhs_source?: "batch" | "web_search" | "none";
+  reviews?: string[];
 }
 
 export type SSEChunk =

@@ -116,10 +116,20 @@ export function RestaurantCard({ card, lang, index, isSelected, onSelect }: Prop
       </div>
 
       {card.highlight && (
-        <div className="px-4 pb-2.5">
+        <div className="px-4 pb-1.5">
           <p className="text-xs text-gray-500 italic line-clamp-1">
-            💬 {card.highlight}
+            🏷️ {card.highlight}
           </p>
+        </div>
+      )}
+
+      {card.reviews && card.reviews.length > 0 && (
+        <div className="px-4 pb-2.5 space-y-1">
+          {card.reviews.map((r, i) => (
+            <p key={i} className="text-xs text-gray-500 line-clamp-2 leading-relaxed">
+              💬 {r}
+            </p>
+          ))}
         </div>
       )}
 

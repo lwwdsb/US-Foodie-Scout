@@ -109,6 +109,20 @@ def _build_cards(
                 return v
         return None
 
+    def _extract_reviews(xhs: dict | None) -> list[str]:
+        """Pull 1-2 short review snippets from XHS data (batch or web_search)."""
+        if not xhs:
+            return []
+        src = xhs.get("xhs_source", "batch")
+        if src == "batch":
+            comment = (xhs.get("sample_comment") or "").strip()
+            return [comment[:120]] if comment else []
+        if src == "web_search":
+            raw = xhs.get("web_snippets", "")
+            snippets = [s.strip() for s in raw.split("\n---\n") if s.strip()]
+            return [s[:120] for s in snippets[:2]]
+        return []
+
     cards = []
     for p in places.values():
         xhs = find_xhs(p["name"])
@@ -158,6 +172,7 @@ def _build_cards(
                 highlight="、".join(top_kw[:3]) if top_kw else None,
                 photo_url=p.get("photo_url"),
                 xhs_source=xhs_source,
+                reviews=_extract_reviews(xhs),
             )
         )
 
