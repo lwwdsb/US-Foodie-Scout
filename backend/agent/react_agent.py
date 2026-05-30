@@ -50,6 +50,11 @@ RECOMMENDATION_SYSTEM_PROMPT = """\
 - 明确说明「基于网络信息」，不捏造具体评分或打卡数
 - 若片段不含该餐厅的有效信息，坦诚说明暂无华人社区评价
 
+【严格规则 — 必须遵守】
+- 只推荐「已获取的餐厅数据」中列出的餐厅，绝不凭记忆或训练数据推荐数据之外的餐厅
+- 若数据中标注「未找到 X，以下为相近替代」，说明用户点名的店未收录或不在服务范围，
+  直接介绍实际找到的替代餐厅，不要编写关于未找到那家店的任何内容
+
 【回复格式】
 - 用用户的输入语言回复，默认中文
 - 开头一句话总结本次推荐亮点
@@ -376,9 +381,13 @@ def _build_context_for_llm(
     places: list[dict],
     xhs_map: dict[str, dict],
     xhs_available: bool,
+    not_found_name: str | None = None,
 ) -> str:
     """Build structured context string for the LLM recommendation prompt."""
-    lines = [f"用户需求：{user_message}\n", "已获取的餐厅数据："]
+    header = f"用户需求：{user_message}\n"
+    if not_found_name:
+        header += f"⚠️ 未找到「{not_found_name}」（未收录或不在服务范围），以下为相近替代推荐，请只介绍这些餐厅：\n"
+    lines = [header, "已获取的餐厅数据："]
     for p in places:
         xhs = xhs_map.get(p["name"])
         xhs_src = xhs.get("xhs_source", "batch") if xhs else None
@@ -494,7 +503,16 @@ async def run_agent_stream(
         cards = _build_cards(places_dict, xhs_map, authenticity_pref=intent.authenticity_pref)
 
         # ── Step 4: LLM generates recommendation text (real SSE streaming) ─────
-        context = _build_context_for_llm(message, places, xhs_map, xhs_available)
+        # Detect named-restaurant miss: user asked for a specific place we couldn't find
+        not_found = None
+        if intent.restaurant_name:
+            name_lower = intent.restaurant_name.lower()
+            if not any(name_lower in p["name"].lower() or p["name"].lower() in name_lower
+                       for p in places):
+                not_found = intent.restaurant_name
+
+        context = _build_context_for_llm(message, places, xhs_map, xhs_available,
+                                          not_found_name=not_found)
         chat_history = _to_messages(history[-12:])  # last 6 turns for context
 
         llm = build_llm(streaming=True)
