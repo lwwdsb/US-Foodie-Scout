@@ -69,6 +69,7 @@ class IntentResult(BaseModel):
     area: Optional[str] = None               # e.g. SGV / Alhambra / Irvine
     authenticity_pref: Optional[str] = None  # "隐藏宝藏" or "必打卡" (ranking hint, not a filter)
     keywords: list[str] = Field(default_factory=list)  # dish/vibe terms for scoring
+    exclude_names: list[str] = Field(default_factory=list)  # restaurants shown in previous turns
 
 
 # ── Restaurant Card ────────────────────────────────────────────────────────────

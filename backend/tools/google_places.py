@@ -17,7 +17,7 @@ from typing import Optional
 
 from schemas.models import PriceLevel
 # Reuse the dataclass + filter helpers from the mock (single source of truth).
-from tools.google_places_mock import PlaceResult, _matches_budget, _matches_cuisine, _matches_area
+from tools.google_places_mock import PlaceResult, _matches_budget, _matches_cuisine, _matches_area, _AREA_ALIASES
 
 logger = logging.getLogger(__name__)
 
@@ -73,11 +73,19 @@ async def search_restaurants(
     budget: Optional[PriceLevel] = None,
     cuisine: Optional[str] = None,
     area: Optional[str] = None,
+    exclude_names: Optional[list[str]] = None,
     limit: int = 5,
 ) -> list[PlaceResult]:
     """Search real restaurants. Same scoring/behavior as the mock's search_restaurants."""
     places = _load()
-    results = [p for p in places if _matches_budget(p, budget) and _matches_cuisine(p, cuisine)]
+    excl_lower = {n.lower() for n in (exclude_names or [])}
+    results = [
+        p for p in places
+        if _matches_budget(p, budget)
+        and _matches_cuisine(p, cuisine)
+        and p.name.lower() not in excl_lower
+        and (not p.name_zh or p.name_zh.lower() not in excl_lower)
+    ]
 
     # Area: soft filter — relax if it would empty the results (incomplete area data).
     if area:

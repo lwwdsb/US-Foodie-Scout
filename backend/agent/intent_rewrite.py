@@ -29,23 +29,30 @@ _TIMEOUT_SECONDS = 8.0
 
 _SYSTEM_PROMPT = """\
 你是餐厅查询的意图抽取器。把用户的中文/英文自然语言需求抽取成 JSON。
-如果提供了对话历史，结合上下文理解当前消息（如"近一点的"、"便宜一点的"是在 refine 上一轮的条件）。
+如果提供了对话历史，结合上下文理解当前消息：
+- "近一点的"、"便宜一点的"等 refine 语句继承上一轮的 area/cuisine
+- "换几家"、"有没有别的"、"再推荐"等语句说明用户不想再看已推荐过的餐厅，
+  从历史的助手回复中提取曾推荐的餐厅名放入 exclude_names
 
-只输出一个 JSON 对象，字段如下（无法判断的字段用 null，keywords 用空数组）：
+只输出一个 JSON 对象，所有字段如下（无法判断的用 null 或空数组）：
 {
-  "restaurant_name": 用户点名的具体餐厅名（如"101 Noodle Express怎么样"→"101 Noodle Express"），没点名则 null,
-  "cuisine": 菜系（如 川菜/火锅/粤式海鲜/日本料理/墨西哥菜/意大利菜），没提则 null,
-  "price_level": 预算，必须是 "$"/"$$"/"$$$"/"$$$$" 之一（便宜→$，别太贵→$$，高档→$$$$），没提则 null,
-  "area": 地区（如 USC/South LA/Koreatown/SGV/Alhambra/Arcadia/Irvine/DTLA/Westside/Santa Monica），没提则 null,
-  "authenticity_pref": 偏好，只能是 "隐藏宝藏"（华人圈口碑好但低调）或 "必打卡"（人气热门），没提则 null,
-  "keywords": 描述菜品/氛围的关键词数组（如 ["辣","聚餐","环境好"]）
+  "restaurant_name": 用户点名的具体餐厅名，没点名则 null,
+  "cuisine": 菜系（川菜/火锅/粤式海鲜/日本料理/墨西哥菜/意大利菜等），没提则 null,
+  "price_level": "$"/"$$"/"$$$"/"$$$$" 之一，没提则 null,
+  "area": 地区（USC/South LA/Koreatown/SGV/Alhambra/Arcadia/Irvine/DTLA/Westside等），没提则 null,
+  "authenticity_pref": "隐藏宝藏" 或 "必打卡"，没提则 null,
+  "keywords": 描述菜品/氛围的关键词数组,
+  "exclude_names": 本轮不应重复推荐的餐厅名列表（从历史中提取，用户想要新选择时填写，否则空数组）
 }
 
-示例输入："想吃辣的火锅，朋友聚餐，SGV，别太贵"
-示例输出：{"restaurant_name":null,"cuisine":"火锅","price_level":"$$","area":"SGV","authenticity_pref":null,"keywords":["辣","聚餐"]}
+示例1 - 新查询：
+输入："想吃辣的火锅，朋友聚餐，SGV，别太贵"
+输出：{"restaurant_name":null,"cuisine":"火锅","price_level":"$$","area":"SGV","authenticity_pref":null,"keywords":["辣","聚餐"],"exclude_names":[]}
 
-示例（refine）历史："USC附近的中餐" → 用户说"有没有近一点的"
-示例输出：{"restaurant_name":null,"cuisine":"中餐","price_level":null,"area":"USC","authenticity_pref":null,"keywords":["近"]}
+示例2 - refine + 排除历史推荐：
+历史：用户"USC附近辣的" → 助手"推荐：扬州餐厅、Howlin Ray's、满堂红..."
+当前消息："有没有再近一点的"
+输出：{"restaurant_name":null,"cuisine":null,"price_level":null,"area":"USC","authenticity_pref":null,"keywords":[],"exclude_names":["扬州餐厅","Howlin Ray's","满堂红"]}
 """
 
 
@@ -82,6 +89,10 @@ def _parse(raw: str) -> IntentResult:
     if not isinstance(kw, list):
         kw = []
 
+    excl = data.get("exclude_names") or []
+    if not isinstance(excl, list):
+        excl = []
+
     return IntentResult(
         restaurant_name=data.get("restaurant_name") or None,
         cuisine=data.get("cuisine") or None,
@@ -89,6 +100,7 @@ def _parse(raw: str) -> IntentResult:
         area=data.get("area") or None,
         authenticity_pref=data.get("authenticity_pref") or None,
         keywords=[str(k) for k in kw if k],
+        exclude_names=[str(n) for n in excl if n],
     )
 
 

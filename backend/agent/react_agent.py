@@ -186,11 +186,13 @@ def _places_cache_key(query: str, budget: PriceLevel | None, cuisine: str | None
 
 
 async def _fetch_places(
-    query: str, budget: PriceLevel | None, cuisine: str | None, area: str | None = None
+    query: str, budget: PriceLevel | None, cuisine: str | None,
+    area: str | None = None, exclude_names: list[str] | None = None,
 ) -> list[dict]:
     from core.rate_limiter import get_redis
 
     cache_key = _places_cache_key(query, budget, cuisine, area)
+    # exclude_names are session-specific — never cache results that have exclusions applied
 
     # Cache read
     try:
@@ -208,26 +210,32 @@ async def _fetch_places(
     else:
         from tools.google_places_mock import search_restaurants as _search
         _search_live = None
-    results = await _search(query=query, budget=budget, cuisine=cuisine, area=area)
-    area_miss = area and not results  # area was specified but nothing matched
+    results = await _search(query=query, budget=budget, cuisine=cuisine,
+                           area=area, exclude_names=exclude_names)
 
-    # Live fallback path 1: area was specified but static DB has no restaurants there
-    # → try live Google (which knows the real geography) before soft-relaxing to full DB
+    # Live fallback path 1: area specified but nothing in static DB for that area
+    # (USC, South LA, Westside, etc.) → live Google knows real geography
     if area and _search_live:
         from tools.google_places_mock import _matches_area
         from tools.google_places import _load
-        area_matched = [p for p in _load() if _matches_area(p, area)]
-        if not area_matched:
+        area_in_db = any(_matches_area(p, area) for p in _load())
+        if not area_in_db:
             logging.getLogger(__name__).info(
-                "Area %r not in static DB — trying live Google search", area
-            )
+                "Area %r not in static DB — trying live Google search", area)
             live = await _search_live(query=query, budget=budget, area=area)
             if live:
                 results = live
 
-    # Live fallback path 2: no results at all (non-area miss)
+    # Live fallback path 2: exclusions emptied the results (user wants fresh picks)
+    elif not results and exclude_names and _search_live:
+        logging.getLogger(__name__).info(
+            "All static results excluded — trying live Google search for fresh picks")
+        results = await _search_live(query=query, budget=budget, area=area)
+
+    # Live fallback path 3: no results at all
     elif not results and _search_live:
-        logging.getLogger(__name__).info("Static DB miss for %r — trying live Google search", query)
+        logging.getLogger(__name__).info(
+            "Static DB miss for %r — trying live Google search", query)
         results = await _search_live(query=query, budget=budget, area=area)
 
     places = [
@@ -418,6 +426,7 @@ async def run_agent_stream(
             budget=intent.price_level,
             cuisine=intent.cuisine,
             area=intent.area,
+            exclude_names=intent.exclude_names or None,
         )
 
         if not places:

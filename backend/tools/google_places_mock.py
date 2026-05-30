@@ -486,9 +486,9 @@ _AREA_ALIASES = {
     "ktown": ["koreatown", "los angeles"],
     "koreatown": ["koreatown", "los angeles"],
     "mid-city": ["mid-wilshire", "los angeles"],
-    # USC / South LA
-    "usc": ["los angeles", "exposition park", "university park", "south los angeles"],
-    "south la": ["los angeles", "south los angeles", "compton", "inglewood"],
+    # USC / South LA — intentionally narrow; "los angeles" alone matches everything
+    "usc": ["university park", "exposition park", "south los angeles", "jefferson park"],
+    "south la": ["south los angeles", "compton", "inglewood", "watts"],
     # Westside
     "westside": ["west los angeles", "santa monica", "culver city", "venice", "brentwood"],
     "west la": ["west los angeles", "santa monica", "culver city"],
@@ -515,14 +515,19 @@ async def search_restaurants(
     budget: Optional[PriceLevel] = None,
     cuisine: Optional[str] = None,
     area: Optional[str] = None,
+    exclude_names: Optional[list[str]] = None,
     limit: int = 5,
 ) -> list[PlaceResult]:
     """Search mock restaurant DB. Simulates ~0.8s Google Places latency."""
     await asyncio.sleep(0.8)
 
+    excl_lower = {n.lower() for n in (exclude_names or [])}
     results = [
         p for p in _MOCK_PLACES
-        if _matches_budget(p, budget) and _matches_cuisine(p, cuisine)
+        if _matches_budget(p, budget)
+        and _matches_cuisine(p, cuisine)
+        and p.name.lower() not in excl_lower
+        and (not p.name_zh or p.name_zh.lower() not in excl_lower)
     ]
 
     # Area is a soft filter: apply it, but if it would empty the results, relax it
