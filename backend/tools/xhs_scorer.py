@@ -114,6 +114,48 @@ def compute_xhs_score(
     return round(volume_score + engagement_score + sentiment_score, 1)
 
 
+def compute_xhs_score_likes(
+    post_count: int,
+    likes: list[int],
+    texts: list[str],
+) -> float:
+    """
+    Likes-primary 0-100 XHS score, for data sources that only expose likes
+    (e.g. Octoparse 2996 search-list scraping — no saves/comments available).
+
+    Saves/comments are NOT collectable from XHS search-result cards, so the
+    saves×3 engagement model of compute_xhs_score() can't be fed. This variant
+    derives engagement from likes alone.
+
+    Args:
+        post_count: number of notes found for the restaurant.
+        likes:      per-note like counts.
+        texts:      per-note text (title only, when desc isn't collected).
+
+    Score breakdown (same buckets as compute_xhs_score):
+        Volume     (0–40): log1p(post_count) × 6.5
+        Engagement (0–40): log1p(median likes) × 7.5  — median is robust to viral
+                           outliers; coefficient raised vs the saves-weighted model.
+        Sentiment  (0–20): keyword sentiment, centred at 10.
+    """
+    volume_score = min(40.0, math.log1p(post_count) * 6.5)
+
+    if likes:
+        s = sorted(likes)
+        n = len(s)
+        median_likes = s[n // 2] if n % 2 else (s[n // 2 - 1] + s[n // 2]) / 2
+        engagement_score = min(40.0, math.log1p(median_likes) * 7.5)
+    else:
+        engagement_score = 0.0
+
+    combined = " ".join(texts)
+    pos = sum(w for kw, w in POSITIVE_KEYWORDS.items() if kw in combined)
+    neg = sum(w for kw, w in NEGATIVE_KEYWORDS.items() if kw in combined)
+    sentiment_score = max(0.0, min(20.0, 10.0 + (pos - neg) * 0.8))
+
+    return round(volume_score + engagement_score + sentiment_score, 1)
+
+
 # ── Keyword extraction ────────────────────────────────────────────────────────
 
 def extract_keywords(

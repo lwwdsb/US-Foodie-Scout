@@ -469,10 +469,35 @@ def _matches_cuisine(place: PlaceResult, cuisine: Optional[str]) -> bool:
     return any(q in kw.lower() or kw.lower() in q for kw in place.keywords)
 
 
+# Area groups → constituent city/neighborhood substrings (matched against address + keywords).
+# Lets a fuzzy "SGV" / "华人区" query resolve to the right cities.
+_AREA_ALIASES = {
+    "sgv": ["alhambra", "san gabriel", "monterey park", "arcadia", "rosemead",
+            "temple city", "el monte", "san marino"],
+    "san gabriel valley": ["alhambra", "san gabriel", "monterey park", "arcadia",
+                           "rosemead", "temple city", "el monte", "san marino"],
+    "华人区": ["alhambra", "san gabriel", "monterey park", "arcadia", "rosemead",
+              "temple city", "rowland heights", "irvine"],
+    "dtla": ["downtown", "los angeles"],
+    "downtown": ["downtown", "los angeles"],
+    "ktown": ["koreatown", "los angeles"],
+}
+
+
+def _matches_area(place: PlaceResult, area: Optional[str]) -> bool:
+    if not area:
+        return True
+    a = area.lower().strip()
+    terms = _AREA_ALIASES.get(a, [a])  # known group → its cities, else the area itself
+    haystack = place.address.lower() + " " + " ".join(k.lower() for k in place.keywords)
+    return any(t in haystack for t in terms)
+
+
 async def search_restaurants(
     query: str = "",
     budget: Optional[PriceLevel] = None,
     cuisine: Optional[str] = None,
+    area: Optional[str] = None,
     limit: int = 5,
 ) -> list[PlaceResult]:
     """Search mock restaurant DB. Simulates ~0.8s Google Places latency."""
@@ -482,6 +507,13 @@ async def search_restaurants(
         p for p in _MOCK_PLACES
         if _matches_budget(p, budget) and _matches_cuisine(p, cuisine)
     ]
+
+    # Area is a soft filter: apply it, but if it would empty the results, relax it
+    # (incomplete area data shouldn't hide otherwise-matching restaurants).
+    if area:
+        narrowed = [p for p in results if _matches_area(p, area)]
+        if narrowed:
+            results = narrowed
 
     if query:
         q = query.lower()

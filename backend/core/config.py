@@ -48,14 +48,32 @@ class Settings(BaseSettings):
     places_cache_ttl_seconds: int = 86400  # 24 hours
     xhs_cache_ttl_seconds: int = 21600     # 6 hours (social data changes faster)
 
-    # XHS — real data (Option A: unofficial API via `xhs` package)
-    # Set XHS_USE_REAL=true once cookie is configured.
+    # XHS — data source selector:
+    #   "mock"     → tools/xhs_sentiment_mock.py (default)
+    #   "bazhuayu" → tools/xhs_bazhuayu.py (offline 八爪鱼 export, recommended for real data)
+    #   "xhs_py"   → tools/xhs_sentiment.py (unofficial `xhs` API — gets the account banned, avoid)
+    xhs_source: str = "mock"
+    # Legacy flag: if xhs_source is unset, xhs_use_real=true still selects the xhs_py path.
     xhs_use_real: bool = False
     xhs_cookie: str = ""
     xhs_search_location: str = "洛杉矶 SGV"
 
+    # Quadrant thresholds (XHS≥/Google≥ → 必打卡/隐藏宝藏/网红慎入/普通).
+    # XHS lowered to 70 because real likes-only scores run lower than the mock's.
+    xhs_high_threshold: float = 70.0
+    google_high_threshold: float = 75.0
+
+    # Google Places — data source:
+    #   "mock" → tools/google_places_mock.py (default)
+    #   "real" → tools/google_places.py (reads data/restaurants.json enriched via Places API)
+    google_source: str = "mock"
+    google_api_key: str = ""
+
     # Yelp Fusion API — restaurant photos
     yelp_api_key: str = ""
+
+    # Tavily — web search fallback for XHS sentiment when restaurant not in xhs_notes.json
+    tavily_api_key: str = ""
 
     model_config = SettingsConfigDict(
         env_file=_ENV_FILE,

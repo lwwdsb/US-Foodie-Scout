@@ -4,7 +4,8 @@ export type AuthenticityTag =
   | "华人必打卡"
   | "隐藏宝藏"
   | "网红店慎入"
-  | "普通推荐";
+  | "普通推荐"
+  | "网络口碑";
 
 export interface RestaurantCard {
   name: string;
@@ -21,6 +22,7 @@ export interface RestaurantCard {
   xhs_post_count: number;
   photo_url: string | null;
   highlight: string | null;
+  xhs_source?: "batch" | "web_search" | "none";
 }
 
 export type SSEChunk =
@@ -67,5 +69,11 @@ export const TAG_CONFIG: Record<
     color: "bg-gray-100 text-gray-600 border-gray-200",
     label_zh: "普通推荐",
     label_en: "General Pick",
+  },
+  网络口碑: {
+    emoji: "🔍",
+    color: "bg-purple-100 text-purple-700 border-purple-200",
+    label_zh: "网络口碑",
+    label_en: "Web Sentiment",
   },
 };

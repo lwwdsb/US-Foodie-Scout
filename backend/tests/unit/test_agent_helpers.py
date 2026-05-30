@@ -41,6 +41,11 @@ class TestPlacesCacheKey:
         k2 = _places_cache_key("推荐", None, "粤菜")
         assert k1 != k2
 
+    def test_different_area_different_key(self):
+        k1 = _places_cache_key("推荐", None, None, "SGV")
+        k2 = _places_cache_key("推荐", None, None, "Irvine")
+        assert k1 != k2
+
 
 # ── _build_cards ──────────────────────────────────────────────────────────────
 
@@ -124,11 +129,48 @@ class TestBuildCards:
         assert tags[2] == AuthenticityTag.general
 
     def test_xhs_fuzzy_name_lookup(self):
-        # XHS key is a partial match of the place name
         places = {"p1": _make_place("p1", "101 Noodle Express", 80)}
         xhs = {"101": _make_xhs("101", 90)}
         cards = _build_cards(places, xhs)
         assert cards[0].xhs_score == 90.0
+
+    def test_pref_hidden_gem_boosted_above_must_visit(self):
+        places = {
+            "p1": _make_place("p1", "MustVisit",  80),
+            "p2": _make_place("p2", "HiddenGem",  60),
+            "p3": _make_place("p3", "General",    60),
+        }
+        xhs = {
+            "MustVisit": _make_xhs("MustVisit", 80),
+            "HiddenGem": _make_xhs("HiddenGem", 80),
+            "General":   _make_xhs("General",   60),
+        }
+        cards = _build_cards(places, xhs, authenticity_pref="隐藏宝藏")
+        assert cards[0].authenticity_tag == AuthenticityTag.hidden_gem
+
+    def test_pref_must_visit_stays_first_by_default(self):
+        places = {
+            "p1": _make_place("p1", "MustVisit", 80),
+            "p2": _make_place("p2", "HiddenGem", 60),
+        }
+        xhs = {
+            "MustVisit": _make_xhs("MustVisit", 80),
+            "HiddenGem": _make_xhs("HiddenGem", 80),
+        }
+        cards = _build_cards(places, xhs, authenticity_pref="必打卡")
+        assert cards[0].authenticity_tag == AuthenticityTag.must_visit
+
+    def test_no_pref_default_order_unchanged(self):
+        places = {
+            "p1": _make_place("p1", "HiddenGem", 60),
+            "p2": _make_place("p2", "MustVisit", 80),
+        }
+        xhs = {
+            "MustVisit": _make_xhs("MustVisit", 80),
+            "HiddenGem": _make_xhs("HiddenGem", 80),
+        }
+        cards = _build_cards(places, xhs)  # no pref
+        assert cards[0].authenticity_tag == AuthenticityTag.must_visit
 
 
 # ── _build_context_for_llm ────────────────────────────────────────────────────

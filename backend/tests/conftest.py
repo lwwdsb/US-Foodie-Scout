@@ -21,6 +21,20 @@ from httpx import AsyncClient, ASGITransport
 from unittest.mock import patch
 
 
+# ── SSE event-loop reset ────────────────────────────────────────────────────────
+# sse_starlette caches a module-level asyncio.Event (AppStatus.should_exit_event),
+# bound to the loop of the first SSE response. pytest-asyncio gives each test a fresh
+# loop, so the stale Event raises "bound to a different event loop" on later tests.
+# Reset it before every test so each gets a clean, loop-local Event.
+
+@pytest.fixture(autouse=True)
+def _reset_sse_appstatus():
+    from sse_starlette.sse import AppStatus
+    AppStatus.should_exit_event = None
+    yield
+    AppStatus.should_exit_event = None
+
+
 # ── Fake Redis ────────────────────────────────────────────────────────────────
 
 @pytest.fixture

@@ -23,7 +23,7 @@ from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 
 from core.config import get_settings
 from core.circuit_breaker import CircuitBreaker
-from schemas.models import RestaurantCard, PriceLevel, compute_authenticity_tag
+from schemas.models import RestaurantCard, PriceLevel, AuthenticityTag, compute_authenticity_tag
 
 settings = get_settings()
 
@@ -33,20 +33,29 @@ _xhs_breaker = CircuitBreaker(name="xhs_sentiment", failure_threshold=3, recover
 RECOMMENDATION_SYSTEM_PROMPT = """\
 你是「北美华人美食侦探」，专为洛杉矶华人社区提供餐厅推荐服务。
 
-你将收到一批已经搜集好的餐厅数据（包含Google评分和小红书社区评价），直接根据这些真实数据向用户推荐。
+你将收到餐厅数据，数据来源分两种：
+1. 【批量数据】：Google评分 + 小红书社区评分（真实离线采集）
+2. 【网络搜索】：Google评分 + 网络搜索片段（实时获取，小红书无离线数据）
 
-【评分体系说明】
-- 🔥 华人必打卡：Google评分≥75 AND 小红书评分≥75
-- 💎 隐藏宝藏：小红书评分≥75，Google偏低（华人圈口碑好但知名度低）
-- ⚠️ 网红店慎入：Google评分≥75，小红书偏低（可能是tourist trap）
+【评分徽章说明】
+- 🔥 华人必打卡：Google≥75 AND 小红书≥70（批量数据）
+- 💎 隐藏宝藏：小红书≥70，Google偏低（华人圈口碑好）
+- ⚠️ 网红店慎入：Google≥75，小红书偏低
 - ⭐ 普通推荐：两端均一般
+- 🔍 网络口碑：无小红书离线数据，根据网络搜索片段评价
+
+【处理网络搜索数据的要求】
+- 收到「小红书（网络搜索片段）」时，仔细阅读片段内容
+- 综合片段中华人社区的评价倾向，给出1-2句定性描述
+- 明确说明「基于网络信息」，不捏造具体评分或打卡数
+- 若片段不含该餐厅的有效信息，坦诚说明暂无华人社区评价
 
 【回复格式】
 - 用用户的输入语言回复，默认中文
-- 开头一句话总结本次推荐的亮点
-- 每家餐厅用1-2句话说明推荐理由，引用小红书关键词增强可信度
-- 结尾可补充实用小贴士（如停车、等位时间等）
-- 不要重复展示评分数字（前端卡片已展示），专注叙述推荐理由
+- 开头一句话总结本次推荐亮点
+- 每家餐厅1-2句推荐理由，批量数据引用小红书关键词，网络搜索数据给出定性判断
+- 结尾可补充实用小贴士
+- 不重复展示评分数字（前端卡片已展示）
 """
 
 # ── LLM ───────────────────────────────────────────────────────────────────────
@@ -82,6 +91,7 @@ def _to_messages(history: list[dict]) -> list:
 def _build_cards(
     places: dict[str, dict],
     xhs_data: dict[str, dict],
+    authenticity_pref: str | None = None,
 ) -> list[RestaurantCard]:
     price_map = {
         "$": PriceLevel.budget,
@@ -102,8 +112,34 @@ def _build_cards(
     cards = []
     for p in places.values():
         xhs = find_xhs(p["name"])
-        xhs_score = xhs["xhs_score"] if xhs else 50.0
-        top_kw = xhs.get("top_keywords", []) if xhs else []
+        is_web = xhs and xhs.get("xhs_source") == "web_search"
+
+        if is_web:
+            xhs_score = 50.0
+            tag = AuthenticityTag.web_sentiment
+            top_kw = []
+            post_count = 0
+            xhs_source = "web_search"
+        elif xhs:
+            xhs_score = xhs["xhs_score"]
+            top_kw = xhs.get("top_keywords", [])
+            post_count = xhs.get("post_count", 0)
+            xhs_source = "batch"
+            tag = compute_authenticity_tag(
+                xhs_score, p["google_score"],
+                xhs_threshold=settings.xhs_high_threshold,
+                google_threshold=settings.google_high_threshold,
+            )
+        else:
+            xhs_score = 50.0
+            top_kw = []
+            post_count = 0
+            xhs_source = "none"
+            tag = compute_authenticity_tag(
+                xhs_score, p["google_score"],
+                xhs_threshold=settings.xhs_high_threshold,
+                google_threshold=settings.google_high_threshold,
+            )
 
         cards.append(
             RestaurantCard(
@@ -115,34 +151,46 @@ def _build_cards(
                 google_score=p["google_score"],
                 xhs_score=xhs_score,
                 price_level=price_map.get(p.get("price_level", "$$"), PriceLevel.moderate),
-                authenticity_tag=compute_authenticity_tag(xhs_score, p["google_score"]),
+                authenticity_tag=tag,
                 cuisine_type=p["cuisine_type"],
                 google_maps_url=p["google_maps_url"],
-                xhs_post_count=xhs.get("post_count", 0) if xhs else 0,
+                xhs_post_count=post_count,
                 highlight="、".join(top_kw[:3]) if top_kw else None,
                 photo_url=p.get("photo_url"),
+                xhs_source=xhs_source,
             )
         )
 
     tag_order = {"华人必打卡": 0, "隐藏宝藏": 1, "网红店慎入": 2, "普通推荐": 3}
-    cards.sort(key=lambda c: (tag_order.get(c.authenticity_tag.value, 9), -c.xhs_score))
+    _pref_tag = {
+        "隐藏宝藏": AuthenticityTag.hidden_gem,
+        "必打卡":  AuthenticityTag.must_visit,
+    }.get(authenticity_pref or "")
+
+    def _sort_key(c: RestaurantCard) -> tuple:
+        base = tag_order.get(c.authenticity_tag.value, 9)
+        if _pref_tag and c.authenticity_tag == _pref_tag:
+            base = -1   # boost matched-pref cards to the top
+        return (base, -c.xhs_score)
+
+    cards.sort(key=_sort_key)
     return cards
 
 
 # ── Step implementations (called directly, no agent loop) ──────────────────────
 
-def _places_cache_key(query: str, budget: PriceLevel | None, cuisine: str | None) -> str:
-    raw = f"{query}|{budget}|{cuisine}"
+def _places_cache_key(query: str, budget: PriceLevel | None, cuisine: str | None, area: str | None = None) -> str:
+    raw = f"{query}|{budget}|{cuisine}|{area}"
     digest = hashlib.md5(raw.encode()).hexdigest()[:12]
     return f"places:{digest}"
 
 
 async def _fetch_places(
-    query: str, budget: PriceLevel | None, cuisine: str | None
+    query: str, budget: PriceLevel | None, cuisine: str | None, area: str | None = None
 ) -> list[dict]:
     from core.rate_limiter import get_redis
 
-    cache_key = _places_cache_key(query, budget, cuisine)
+    cache_key = _places_cache_key(query, budget, cuisine, area)
 
     # Cache read
     try:
@@ -154,9 +202,19 @@ async def _fetch_places(
     except Exception as e:
         logging.getLogger(__name__).warning("Places cache read failed: %s", e)
 
-    # Cache miss — call data source
-    from tools.google_places_mock import search_restaurants as _search
-    results = await _search(query=query, budget=budget, cuisine=cuisine)
+    # Cache miss — call data source (google_source: "mock" | "real")
+    if settings.google_source == "real":
+        from tools.google_places import search_restaurants as _search, search_restaurants_live as _search_live
+    else:
+        from tools.google_places_mock import search_restaurants as _search
+        _search_live = None
+    results = await _search(query=query, budget=budget, cuisine=cuisine, area=area)
+
+    # Live fallback: if static DB returns nothing, query Google Places API in real time
+    if not results and _search_live:
+        logging.getLogger(__name__).info("Static DB miss for %r — trying live Google search", query)
+        results = await _search_live(query=query, budget=budget, area=area)
+
     places = [
         {
             "place_id": p.place_id,
@@ -200,9 +258,14 @@ async def _fetch_xhs(restaurant_name: str) -> dict | None:
         logging.getLogger(__name__).warning("XHS cache read failed: %s", e)
 
     # ── Choose implementation ───────────────────────────────────────────────
-    if settings.xhs_use_real:
+    # xhs_source: "mock" | "bazhuayu" | "xhs_py". Legacy xhs_use_real → xhs_py.
+    source = settings.xhs_source
+    if source == "xhs_py" or (source == "mock" and settings.xhs_use_real):
         from tools.xhs_sentiment import get_xhs_sentiment as _get_xhs
         timeout = 15.0   # real network call can be slow
+    elif source == "bazhuayu":
+        from tools.xhs_bazhuayu import get_xhs_sentiment as _get_xhs
+        timeout = 3.0    # local cache read, fast
     else:
         from tools.xhs_sentiment_mock import get_xhs_sentiment as _get_xhs
         timeout = 3.0
@@ -222,8 +285,9 @@ async def _fetch_xhs(restaurant_name: str) -> dict | None:
 
     result = await _xhs_breaker.call(_call())
 
-    # ── Cache write ─────────────────────────────────────────────────────────
+    # ── Cache write (batch) ──────────────────────────────────────────────────
     if result:
+        result["xhs_source"] = "batch"
         try:
             redis = await get_redis()
             await redis.setex(
@@ -233,8 +297,25 @@ async def _fetch_xhs(restaurant_name: str) -> dict | None:
             )
         except Exception as e:
             logging.getLogger(__name__).warning("XHS cache write failed: %s", e)
+        return result
 
-    return result
+    # ── Tavily web-search fallback ───────────────────────────────────────────
+    from tools.xhs_web_search import search_xhs_sentiment
+    snippets = await search_xhs_sentiment(restaurant_name)
+    if snippets:
+        web_result = {"xhs_source": "web_search", "web_snippets": snippets}
+        try:
+            redis = await get_redis()
+            await redis.setex(
+                cache_key,
+                settings.xhs_cache_ttl_seconds // 2,   # shorter TTL for web data
+                json.dumps(web_result, ensure_ascii=False),
+            )
+        except Exception as e:
+            logging.getLogger(__name__).warning("XHS web cache write failed: %s", e)
+        return web_result
+
+    return None
 
 
 def _build_context_for_llm(
@@ -247,21 +328,39 @@ def _build_context_for_llm(
     lines = [f"用户需求：{user_message}\n", "已获取的餐厅数据："]
     for p in places:
         xhs = xhs_map.get(p["name"])
-        xhs_score = xhs["xhs_score"] if xhs else "不可用"
-        top_kw = "、".join(xhs["top_keywords"][:3]) if xhs else "无"
-        warning = "、".join(xhs["warning_keywords"][:2]) if xhs and xhs["warning_keywords"] else "无"
-        sample = xhs["sample_comment"] if xhs else "无"
-        lines.append(
-            f"\n【{p['name_zh'] or p['name']}】\n"
-            f"  Google评分：{p['google_score']}/100\n"
-            f"  小红书评分：{xhs_score}/100\n"
-            f"  小红书关键词：{top_kw}\n"
-            f"  差评提示：{warning}\n"
-            f"  代表性评论：{sample}\n"
-            f"  价格：{p['price_level']} | 菜系：{p['cuisine_type']}"
-        )
+        xhs_src = xhs.get("xhs_source", "batch") if xhs else None
+
+        if xhs_src == "web_search":
+            snippets = xhs.get("web_snippets", "")
+            lines.append(
+                f"\n【{p['name_zh'] or p['name']}】\n"
+                f"  Google评分：{p['google_score']}/100\n"
+                f"  小红书（网络搜索片段，请综合评价）：\n{snippets}\n"
+                f"  价格：{p['price_level']} | 菜系：{p['cuisine_type']}"
+            )
+        elif xhs_src == "batch":
+            xhs_score = xhs["xhs_score"]
+            top_kw = "、".join(xhs["top_keywords"][:3]) if xhs["top_keywords"] else "无"
+            warning = "、".join(xhs["warning_keywords"][:2]) if xhs["warning_keywords"] else "无"
+            sample = xhs["sample_comment"] or "无"
+            lines.append(
+                f"\n【{p['name_zh'] or p['name']}】\n"
+                f"  Google评分：{p['google_score']}/100\n"
+                f"  小红书评分：{xhs_score}/100\n"
+                f"  小红书关键词：{top_kw}\n"
+                f"  差评提示：{warning}\n"
+                f"  代表性评论：{sample}\n"
+                f"  价格：{p['price_level']} | 菜系：{p['cuisine_type']}"
+            )
+        else:
+            lines.append(
+                f"\n【{p['name_zh'] or p['name']}】\n"
+                f"  Google评分：{p['google_score']}/100\n"
+                f"  小红书：暂无数据\n"
+                f"  价格：{p['price_level']} | 菜系：{p['cuisine_type']}"
+            )
     if not xhs_available:
-        lines.append("\n⚠️ 小红书数据暂时不可用，以上评分为默认值。")
+        lines.append("\n⚠️ 小红书离线数据不可用。")
     return "\n".join(lines)
 
 
@@ -274,15 +373,32 @@ async def run_agent_stream(
     cuisine: str | None = None,
 ) -> AsyncIterator[dict]:
     """
-    Deterministic 3-step pipeline:
-      1. search_restaurants (direct call)
+    Deterministic pipeline:
+      0. extract_intent (DeepSeek JSON) — fuzzy NL → structured fields
+      1. search_restaurants (direct call, driven by intent)
       2. get_xhs_sentiment for each result (direct calls, parallel)
       3. LLM generates recommendation text (real streaming)
     No agent loop — no hallucination, no repeated phrases.
     """
     try:
-        # ── Step 1: Search ─────────────────────────────────────────────────────
-        places = await _fetch_places(query=message, budget=budget, cuisine=cuisine)
+        # ── Step 0: Intent extraction (degrades to raw message on failure) ─────
+        from agent.intent_rewrite import extract_intent
+        intent = await extract_intent(message, ui_budget=budget, ui_cuisine=cuisine)
+
+        # Named-restaurant query → search by name (skip keyword filtering, keep
+        # the out-of-DB live fallback). Otherwise drive search from intent fields.
+        if intent.restaurant_name:
+            search_query = intent.restaurant_name
+        else:
+            search_query = " ".join(intent.keywords) if intent.keywords else message
+
+        # ── Step 1: Search (UI precedence already applied inside extract_intent) ─
+        places = await _fetch_places(
+            query=search_query,
+            budget=intent.price_level,
+            cuisine=intent.cuisine,
+            area=intent.area,
+        )
 
         if not places:
             yield {"type": "text", "content": "抱歉，未找到符合条件的餐厅。请尝试放宽预算或菜系条件。"}
@@ -316,7 +432,7 @@ async def run_agent_stream(
 
         # ── Step 3: Build cards ────────────────────────────────────────────────
         places_dict = {p["place_id"]: p for p in places}
-        cards = _build_cards(places_dict, xhs_map)
+        cards = _build_cards(places_dict, xhs_map, authenticity_pref=intent.authenticity_pref)
 
         # ── Step 4: LLM generates recommendation text (real SSE streaming) ─────
         context = _build_context_for_llm(message, places, xhs_map, xhs_available)

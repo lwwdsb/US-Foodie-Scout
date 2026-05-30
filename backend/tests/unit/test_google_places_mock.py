@@ -11,6 +11,7 @@ from tools.google_places_mock import (
     PlaceResult,
     _matches_budget,
     _matches_cuisine,
+    _matches_area,
     search_restaurants,
     _MOCK_PLACES,
 )
@@ -25,6 +26,34 @@ def _place(**kwargs) -> PlaceResult:
     )
     defaults.update(kwargs)
     return PlaceResult(**defaults)
+
+
+# ── _matches_area ─────────────────────────────────────────────────────────────
+
+class TestMatchesArea:
+    def test_none_area_matches_all(self):
+        p = _place(address="123 Main St, Irvine, CA")
+        assert _matches_area(p, None) is True
+
+    def test_direct_city_in_address(self):
+        p = _place(address="123 Main St, Alhambra, CA 91801")
+        assert _matches_area(p, "Alhambra") is True
+
+    def test_sgv_alias_expands_to_cities(self):
+        p = _place(address="500 W Valley Blvd, San Gabriel, CA")
+        assert _matches_area(p, "SGV") is True
+
+    def test_sgv_alias_no_match_outside(self):
+        p = _place(address="100 Main St, Irvine, CA", keywords=["irvine"])
+        assert _matches_area(p, "SGV") is False
+
+    def test_area_matches_keyword(self):
+        p = _place(address="100 Sunset Blvd, Los Angeles, CA", keywords=["koreatown", "bbq"])
+        assert _matches_area(p, "Koreatown") is True
+
+    def test_chinese_area_group(self):
+        p = _place(address="200 E Main St, Arcadia, CA")
+        assert _matches_area(p, "华人区") is True
 
 
 # ── _matches_budget ───────────────────────────────────────────────────────────
@@ -108,3 +137,14 @@ class TestSearchRestaurants:
     async def test_empty_query_returns_results(self):
         results = await search_restaurants(query="")
         assert len(results) > 0
+
+    async def test_area_filters_to_region(self):
+        results = await search_restaurants(area="Alhambra", limit=100)
+        assert len(results) >= 1
+        assert all("alhambra" in r.address.lower() for r in results)
+
+    async def test_area_relaxes_when_no_match(self):
+        # An area present nowhere in the mock DB should NOT empty the results
+        # (soft filter relaxes rather than returning nothing).
+        results = await search_restaurants(area="Honolulu", limit=100)
+        assert len(results) == len(_MOCK_PLACES)

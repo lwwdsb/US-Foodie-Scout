@@ -91,10 +91,17 @@ export function RestaurantCard({ card, lang, index, isSelected, onSelect }: Prop
           <span className="w-16 shrink-0">{tr.googleScore}</span>
           <ScoreBar score={card.google_score} color="bg-blue-400" />
         </div>
-        <div className="flex items-center gap-2 text-xs text-gray-500">
-          <span className="w-16 shrink-0">{tr.xhsScore}</span>
-          <ScoreBar score={card.xhs_score} color="bg-rose-400" />
-        </div>
+        {card.xhs_source === "web_search" ? (
+          <div className="flex items-center gap-2 text-xs text-purple-500">
+            <span className="w-16 shrink-0">{tr.xhsScore}</span>
+            <span className="italic">🔍 {lang === "zh" ? "基于网络搜索评价" : "Web search sentiment"}</span>
+          </div>
+        ) : (
+          <div className="flex items-center gap-2 text-xs text-gray-500">
+            <span className="w-16 shrink-0">{tr.xhsScore}</span>
+            <ScoreBar score={card.xhs_score} color="bg-rose-400" />
+          </div>
+        )}
       </div>
 
       {/* Meta */}
