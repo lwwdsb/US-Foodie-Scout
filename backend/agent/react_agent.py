@@ -253,6 +253,21 @@ async def _fetch_places(
             "Static DB miss for %r — trying live Google search", query)
         results = await _search_live(query=query, budget=budget, area=area)
 
+    # Live supplement: static returned results but fewer than threshold
+    # → call live Google and append non-duplicate results for better coverage
+    _SUPPLEMENT_THRESHOLD = 3
+    if 0 < len(results) < _SUPPLEMENT_THRESHOLD and _search_live:
+        logging.getLogger(__name__).info(
+            "Only %d static result(s) — supplementing with live Google search", len(results))
+        live = await _search_live(query=query, budget=budget, area=area)
+        seen_ids   = {p.place_id for p in results}
+        seen_names = {p.name.lower() for p in results}
+        for p in live:
+            if p.place_id not in seen_ids and p.name.lower() not in seen_names:
+                results.append(p)
+                seen_ids.add(p.place_id)
+                seen_names.add(p.name.lower())
+
     places = [
         {
             "place_id": p.place_id,
