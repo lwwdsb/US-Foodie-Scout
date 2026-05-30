@@ -1,3 +1,4 @@
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from functools import lru_cache
 from pathlib import Path
@@ -37,8 +38,17 @@ class Settings(BaseSettings):
     la_lng_min: float = -118.67
     la_lng_max: float = -117.65
 
-    # CORS — set ALLOWED_ORIGINS=https://yourdomain.com,https://www.yourdomain.com in prod
-    allowed_origins: list[str] = ["http://localhost:3000", "http://127.0.0.1:3000"]
+    # CORS — set ALLOWED_ORIGINS=https://yourdomain.com,https://www.yourdomain.com in prod.
+    # Stored as a plain string (pydantic-settings would JSON-parse a list field from env
+    # and crash on a bare comma-separated string); exposed as a list via the property below.
+    cors_origins_raw: str = Field(
+        default="http://localhost:3000,http://127.0.0.1:3000",
+        validation_alias="ALLOWED_ORIGINS",
+    )
+
+    @property
+    def allowed_origins(self) -> list[str]:
+        return [o.strip() for o in self.cors_origins_raw.split(",") if o.strip()]
 
     # Session
     session_ttl_seconds: int = 7200    # 2 hours
